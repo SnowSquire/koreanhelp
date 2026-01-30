@@ -205,6 +205,12 @@ function App() {
 				>
 					View Stats
 				</A>
+				<A
+					href="/decomposer"
+					class="rounded border border-purple-500 bg-transparent px-4 py-2 text-sm text-purple-400 transition hover:bg-purple-600 hover:text-white"
+				>
+					Korean Decomposer
+				</A>
 				<button
 					type="button"
 					class="rounded border border-zinc-600 bg-transparent px-4 py-2 text-sm text-white/60 transition hover:bg-zinc-800 hover:text-white/90"
