@@ -92,6 +92,7 @@ interface TrainerState {
 	round: Round | null;
 	flashRed: boolean;
 	flashGreen: boolean;
+	easyMode: boolean;
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -100,6 +101,7 @@ interface TrainerState {
 export const ROLLING_WINDOW = 10;
 export const MAX_STRIKES = 3;
 const REVEAL_DELAY_MS = 3000;
+const EASY_MODE_REVEAL_DELAY_MS = 2000;
 const FLASH_DURATION_MS = 300;
 const GREEN_FLASH_DURATION_MS = 1000;
 
@@ -139,6 +141,7 @@ export function useTrainer() {
 		round: null,
 		flashRed: false,
 		flashGreen: false,
+		easyMode: false,
 	});
 
 	// Audio setup
@@ -152,6 +155,7 @@ export function useTrainer() {
 	// Resource tracking
 	let prevSpeaker: string | null = null;
 	let revealTimeoutId: number | null = null;
+	let easyModeRevealTimeoutId: number | null = null;
 	let flashRedTimeoutId: number | null = null;
 	let flashGreenTimeoutId: number | null = null;
 
@@ -160,6 +164,10 @@ export function useTrainer() {
 		if (revealTimeoutId !== null) {
 			clearTimeout(revealTimeoutId);
 			revealTimeoutId = null;
+		}
+		if (easyModeRevealTimeoutId !== null) {
+			clearTimeout(easyModeRevealTimeoutId);
+			easyModeRevealTimeoutId = null;
 		}
 		if (flashRedTimeoutId !== null) {
 			clearTimeout(flashRedTimeoutId);
@@ -254,6 +262,9 @@ export function useTrainer() {
 	}
 
 	function recordTrial(strikes: number): void {
+		// Don't record in easy mode
+		if (state.easyMode) return;
+		
 		if (!state.round || state.round.startedAt === null) return;
 
 		const reactionMs = Math.round(performance.now() - state.round.startedAt);
@@ -343,6 +354,17 @@ export function useTrainer() {
 		// Flash red
 		flashRedBriefly(roundId);
 
+		// In easy mode: reveal after 2 seconds
+		if (state.easyMode) {
+			easyModeRevealTimeoutId = window.setTimeout(() => {
+				if (state.round?.id === roundId) {
+					recordTrial(newStrikes);
+					toRevealing(roundId);
+				}
+			}, EASY_MODE_REVEAL_DELAY_MS);
+			return;
+		}
+
 		// Check if max strikes reached
 		if (newStrikes >= MAX_STRIKES) {
 			recordTrial(newStrikes);
@@ -363,6 +385,10 @@ export function useTrainer() {
 		}
 	}
 
+	function toggleEasyMode(): void {
+		setState("easyMode", !state.easyMode);
+	}
+
 	// ─────────────────────────────────────────────────────────
 	// Public API
 	// ─────────────────────────────────────────────────────────
@@ -381,5 +407,6 @@ export function useTrainer() {
 		guess,
 		replay,
 		resetHistory,
+		toggleEasyMode,
 	};
 }

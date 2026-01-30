@@ -38,6 +38,24 @@ function App() {
 			}}
 		>
 			<div class="w-full max-w-3xl px-6 py-8">
+				{/* Easy Mode Toggle - Top Right */}
+				<div class="mb-8 flex justify-end">
+					<button
+						type="button"
+						class="flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition"
+						classList={{
+							"bg-amber-600 text-white hover:bg-amber-700":
+								trainer.state.easyMode,
+							"bg-zinc-800 text-white/60 hover:bg-zinc-700 hover:text-white/90":
+								!trainer.state.easyMode,
+						}}
+						onClick={trainer.toggleEasyMode}
+					>
+						<span>✓</span>
+						<span>Easy Mode</span>
+					</button>
+				</div>
+
 				<h1 class="mb-8 text-center text-3xl font-bold">
 					Korean Listening Trainer
 				</h1>
