@@ -10,6 +10,7 @@ export interface Trial {
 	reactionMs: number;
 	timestamp: number;
 	strikes: number;
+	wrongGuesses: string[]; // symbols the user incorrectly guessed
 }
 
 // ─────────────────────────────────────────────────────────────

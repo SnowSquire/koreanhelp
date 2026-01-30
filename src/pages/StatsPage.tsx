@@ -67,7 +67,7 @@ export default function StatsPage() {
 													stats.attempts > 0 ? bgColor() : "transparent",
 											}}
 										>
-											<span class="text-2xl font-bold">{stats.symbol}</span>
+											<span class="nanum-gothic-coding-regular text-2xl font-bold">{stats.symbol}</span>
 											<span class="text-xs text-white/60">
 												{TRANSLITERATION[stats.symbol] || ""}
 											</span>

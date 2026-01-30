@@ -116,7 +116,7 @@ function App() {
 							{/* Symbol + transliteration area (fixed height, only visible during reveal) */}
 							<div class="flex h-20 flex-col items-center justify-center">
 								<Show when={gameState() === "revealing" && currentSymbol()}>
-									<div class="text-5xl font-bold text-blue-400">
+									<div class="nanum-gothic-coding-regular text-5xl font-bold text-blue-400">
 										{currentSymbol()}
 									</div>
 									<div class="text-lg text-white/80">
@@ -154,7 +154,7 @@ function App() {
 						return (
 							<button
 								type="button"
-								class="rounded-lg border-2 px-4 py-3 text-2xl transition disabled:cursor-not-allowed"
+								class="nanum-gothic-coding-regular rounded-lg border-2 px-4 py-3 text-2xl transition disabled:cursor-not-allowed"
 								classList={{
 									// Correct answer during reveal: highlighted
 									"!border-blue-500 !bg-blue-600 !text-white scale-110 shadow-lg shadow-blue-500/50":

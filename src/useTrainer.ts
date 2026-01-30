@@ -84,6 +84,7 @@ interface Round {
 	url: string;
 	strikes: number;
 	startedAt: number | null;
+	wrongGuesses: string[];
 }
 
 interface TrainerState {
@@ -224,6 +225,7 @@ export function useTrainer() {
 				url: clip.url,
 				strikes: 0,
 				startedAt: null,
+				wrongGuesses: [],
 			},
 			flashRed: false,
 		});
@@ -257,6 +259,7 @@ export function useTrainer() {
 		const reactionMs = Math.round(performance.now() - state.round.startedAt);
 		const roundSymbol = state.round.symbol;
 		const roundSpeaker = state.round.speaker;
+		const roundWrongGuesses = [...state.round.wrongGuesses];
 
 		setHistory((prev) => [
 			...prev,
@@ -266,6 +269,7 @@ export function useTrainer() {
 				reactionMs,
 				timestamp: Date.now(),
 				strikes,
+				wrongGuesses: roundWrongGuesses,
 			},
 		]);
 	}
@@ -327,6 +331,7 @@ export function useTrainer() {
 			produce((s) => {
 				if (s.round) {
 					s.round.strikes = newStrikes;
+					s.round.wrongGuesses.push(input);
 				}
 			})
 		);
