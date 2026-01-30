@@ -1,4 +1,5 @@
 import { useKeyDownEvent } from "@solid-primitives/keyboard";
+import { A } from "@solidjs/router";
 import { createEffect, For, Show } from "solid-js";
 import {
 	MAX_STRIKES,
@@ -179,7 +180,13 @@ function App() {
 			</div>
 
 			{/* Reset history */}
-			<div class="mb-8 text-center">
+			<div class="mb-8 flex justify-center gap-4">
+				<A
+					href="/stats"
+					class="rounded border border-blue-500 bg-transparent px-4 py-2 text-sm text-blue-400 transition hover:bg-blue-600 hover:text-white"
+				>
+					View Stats
+				</A>
 				<button
 					type="button"
 					class="rounded border border-zinc-600 bg-transparent px-4 py-2 text-sm text-white/60 transition hover:bg-zinc-800 hover:text-white/90"

@@ -1,9 +1,9 @@
 import { createAudio, makeAudioPlayer } from "@solid-primitives/audio";
-import { makePersisted } from "@solid-primitives/storage";
 import { createMemo, createSignal, onCleanup } from "solid-js";
 import { createStore, produce } from "solid-js/store";
 import buzzerUrl from "./assets/wrong-answer-sound-effect.mp3";
 import dingUrl from "./assets/ding.mp3";
+import { useHistory } from "./historyStore";
 
 // ─────────────────────────────────────────────────────────────
 // Audio manifest (resolved at build time via Vite)
@@ -73,13 +73,7 @@ export const TRANSLITERATION: Record<string, string> = {
 // ─────────────────────────────────────────────────────────────
 // Types
 // ─────────────────────────────────────────────────────────────
-export interface Trial {
-	symbol: string;
-	speaker: string;
-	reactionMs: number;
-	timestamp: number;
-	strikes: number;
-}
+export type { Trial } from "./historyStore";
 
 export type GameState = "idle" | "playing" | "awaiting" | "revealing";
 
@@ -121,17 +115,15 @@ let roundIdCounter = 0;
 // Hook
 // ─────────────────────────────────────────────────────────────
 export function useTrainer() {
-	// Persisted history
-	const [history, setHistory] = makePersisted(createSignal<Trial[]>([]), {
-		name: "korean-rt:v1",
-	});
+	// Persisted history (shared singleton from historyStore)
+	const [history, setHistory] = useHistory();
 
 	// Derived stats
 	const rollingAvg = createMemo(() => {
 		const h = history();
 		if (h.length === 0) return null;
 		const slice = h.slice(-ROLLING_WINDOW);
-		const sum = slice.reduce((acc, t) => acc + t.reactionMs, 0);
+		const sum = slice.reduce((acc: number, t) => acc + t.reactionMs, 0);
 		return sum / slice.length;
 	});
 
@@ -263,12 +255,14 @@ export function useTrainer() {
 		if (!state.round || state.round.startedAt === null) return;
 
 		const reactionMs = Math.round(performance.now() - state.round.startedAt);
+		const roundSymbol = state.round.symbol;
+		const roundSpeaker = state.round.speaker;
 
 		setHistory((prev) => [
 			...prev,
 			{
-				symbol: state.round!.symbol,
-				speaker: state.round!.speaker,
+				symbol: roundSymbol,
+				speaker: roundSpeaker,
 				reactionMs,
 				timestamp: Date.now(),
 				strikes,
