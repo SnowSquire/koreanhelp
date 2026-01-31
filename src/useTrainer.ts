@@ -1,5 +1,5 @@
-import { createAudio, makeAudioPlayer } from "@solid-primitives/audio";
-import { createMemo, createSignal, onCleanup } from "solid-js";
+import { makeAudioPlayer } from "@solid-primitives/audio";
+import { createMemo, onCleanup } from "solid-js";
 import { createStore, produce } from "solid-js/store";
 import buzzerUrl from "./assets/wrong-answer-sound-effect.mp3";
 import dingUrl from "./assets/ding.mp3";
@@ -13,23 +13,92 @@ const audioModules = import.meta.glob<string>(
 	{ eager: true, query: "?url", import: "default" },
 );
 
+// Aspirated consonants to exclude (missing aspiration marker audio)
+const EXCLUDED_SYMBOLS = new Set(["ㅊ", "ㅋ", "ㅌ", "ㅍ"]);
+
 interface Clip {
-	url: string;
+	urls: string[]; // Array of URLs for multi-part sounds (played sequentially)
 	speaker: string;
-	ext: string;
 }
 
 type Manifest = Record<string, Clip[]>;
 
 function buildManifest(): Manifest {
-	const manifest: Manifest = {};
+	// First pass: collect all files grouped by symbol and speaker
+	const symbolSpeakerFiles: Record<
+		string,
+		Record<string, { url: string; part: number; ext: string }[]>
+	> = {};
+
 	for (const [path, url] of Object.entries(audioModules)) {
-		const match = path.match(/\/korean_audio\/([^/]+)\/([^/]+)\.(\w+)$/);
+		// Match patterns like: /korean_audio/ㅏ/JE.mp3 or /korean_audio/ㅕ/JE-1.mp3
+		const match = path.match(
+			/\/korean_audio\/([^/]+)\/([A-Za-z]+)(?:-(\d+))?\.(\w+)$/
+		);
 		if (!match) continue;
-		const [, symbol, speaker, ext] = match;
-		if (!manifest[symbol]) manifest[symbol] = [];
-		manifest[symbol].push({ url, speaker, ext });
+
+		const [, symbol, speaker, partStr, ext] = match;
+
+		// Skip excluded symbols (aspirated consonants)
+		if (EXCLUDED_SYMBOLS.has(symbol)) continue;
+
+		// Skip wikipedia files for this logic (they're single files)
+		if (speaker === "wikipedia") {
+			// Handle wikipedia as a single-file clip
+			if (!symbolSpeakerFiles[symbol]) symbolSpeakerFiles[symbol] = {};
+			if (!symbolSpeakerFiles[symbol][speaker]) {
+				symbolSpeakerFiles[symbol][speaker] = [];
+			}
+			symbolSpeakerFiles[symbol][speaker].push({ url, part: 0, ext });
+			continue;
+		}
+
+		const part = partStr ? parseInt(partStr, 10) : 0;
+
+		if (!symbolSpeakerFiles[symbol]) symbolSpeakerFiles[symbol] = {};
+		if (!symbolSpeakerFiles[symbol][speaker]) {
+			symbolSpeakerFiles[symbol][speaker] = [];
+		}
+
+		// Only add if this part number doesn't already exist (avoid duplicates)
+		const existing = symbolSpeakerFiles[symbol][speaker].find(
+			(f) => f.part === part
+		);
+		if (!existing) {
+			symbolSpeakerFiles[symbol][speaker].push({ url, part, ext });
+		}
 	}
+
+	// Second pass: build the manifest with ordered URLs
+	const manifest: Manifest = {};
+
+	for (const [symbol, speakers] of Object.entries(symbolSpeakerFiles)) {
+		manifest[symbol] = [];
+
+		for (const [speaker, files] of Object.entries(speakers)) {
+			// Sort by part number
+			files.sort((a, b) => a.part - b.part);
+
+			// Check if this is a numbered multi-part sound
+			const hasNumberedParts = files.some((f) => f.part > 0);
+
+			if (hasNumberedParts) {
+				// Only include files with part > 0 (numbered files)
+				const numberedFiles = files.filter((f) => f.part > 0);
+				const urls = numberedFiles.map((f) => f.url);
+				if (urls.length > 0) {
+					manifest[symbol].push({ urls, speaker });
+				}
+			} else {
+				// Single file (part === 0)
+				const singleFile = files.find((f) => f.part === 0);
+				if (singleFile) {
+					manifest[symbol].push({ urls: [singleFile.url], speaker });
+				}
+			}
+		}
+	}
+
 	return manifest;
 }
 
@@ -81,7 +150,7 @@ interface Round {
 	id: number;
 	symbol: string;
 	speaker: string;
-	url: string;
+	urls: string[]; // Array of URLs for multi-part sounds
 	strikes: number;
 	startedAt: number | null;
 	wrongGuesses: string[];
@@ -101,7 +170,6 @@ interface TrainerState {
 export const ROLLING_WINDOW = 10;
 export const MAX_STRIKES = 3;
 const REVEAL_DELAY_MS = 3000;
-const EASY_MODE_REVEAL_DELAY_MS = 2000;
 const FLASH_DURATION_MS = 300;
 const GREEN_FLASH_DURATION_MS = 1000;
 
@@ -144,18 +212,21 @@ export function useTrainer() {
 		easyMode: false,
 	});
 
-	// Audio setup
-	const [audioUrl, setAudioUrl] = createSignal<string>("");
-	const [mainAudio, mainControls] = createAudio(audioUrl);
+	// Audio setup - using raw Audio elements for sequencing
 	const buzzer = makeAudioPlayer(buzzerUrl);
 	buzzer.player.volume = 0.25;
 	const ding = makeAudioPlayer(dingUrl);
 	ding.player.volume = 0.5;
 
+	// Audio sequencer state
+	let audioElements: HTMLAudioElement[] = [];
+	let currentPartIndex = 0;
+	let isPlayingSequence = false;
+	let currentRoundIdForAudio: number | null = null;
+
 	// Resource tracking
 	let prevSpeaker: string | null = null;
 	let revealTimeoutId: number | null = null;
-	let easyModeRevealTimeoutId: number | null = null;
 	let flashRedTimeoutId: number | null = null;
 	let flashGreenTimeoutId: number | null = null;
 
@@ -164,10 +235,6 @@ export function useTrainer() {
 		if (revealTimeoutId !== null) {
 			clearTimeout(revealTimeoutId);
 			revealTimeoutId = null;
-		}
-		if (easyModeRevealTimeoutId !== null) {
-			clearTimeout(easyModeRevealTimeoutId);
-			easyModeRevealTimeoutId = null;
 		}
 		if (flashRedTimeoutId !== null) {
 			clearTimeout(flashRedTimeoutId);
@@ -179,27 +246,94 @@ export function useTrainer() {
 		}
 	}
 
-	// Audio 'playing' event handler with round ID guard
-	function handleAudioPlaying() {
-		// Only transition to awaiting if we're in 'playing' state
-		if (state.gameState === "playing" && state.round) {
-			setState(
-				produce((s) => {
-					s.gameState = "awaiting";
-					if (s.round) {
-						s.round.startedAt = performance.now();
-					}
-				})
-			);
+	// Stop any playing audio and clean up
+	function stopAudioSequence() {
+		isPlayingSequence = false;
+		currentPartIndex = 0;
+		for (const audio of audioElements) {
+			audio.pause();
+			audio.currentTime = 0;
+			audio.onended = null;
+			audio.onplaying = null;
 		}
+		audioElements = [];
 	}
 
-	mainAudio.player.addEventListener("playing", handleAudioPlaying);
+	// Preload and prepare audio elements for a sequence
+	function prepareAudioSequence(urls: string[], roundId: number): void {
+		stopAudioSequence();
+		currentRoundIdForAudio = roundId;
+		
+		audioElements = urls.map((url, index) => {
+			const audio = new Audio(url);
+			audio.preload = "auto";
+			
+			// Set up the 'ended' event to play next part
+			audio.onended = () => {
+				if (!isPlayingSequence || currentRoundIdForAudio !== roundId) return;
+				
+				currentPartIndex++;
+				if (currentPartIndex < audioElements.length) {
+					// Play next part
+					audioElements[currentPartIndex].play();
+				} else {
+					// Sequence complete
+					isPlayingSequence = false;
+					currentPartIndex = 0;
+				}
+			};
+
+			// Set up the 'playing' event only for the first part
+			if (index === 0) {
+				audio.onplaying = () => {
+					if (currentRoundIdForAudio !== roundId) return;
+					
+					// Only transition to awaiting if we're in 'playing' state
+					if (state.gameState === "playing" && state.round) {
+						setState(
+							produce((s) => {
+								s.gameState = "awaiting";
+								if (s.round) {
+									s.round.startedAt = performance.now();
+								}
+							})
+						);
+					}
+				};
+			}
+
+			return audio;
+		});
+	}
+
+	// Start playing the audio sequence from the beginning
+	function playAudioSequence(): void {
+		if (audioElements.length === 0) return;
+		
+		currentPartIndex = 0;
+		isPlayingSequence = true;
+		audioElements[0].play();
+	}
+
+	// Replay the current sequence from the beginning
+	function replayAudioSequence(): void {
+		if (audioElements.length === 0) return;
+		
+		// Stop current playback
+		for (const audio of audioElements) {
+			audio.pause();
+			audio.currentTime = 0;
+		}
+		
+		currentPartIndex = 0;
+		isPlayingSequence = true;
+		audioElements[0].play();
+	}
 
 	// Cleanup on unmount
 	onCleanup(() => {
 		clearTimeouts();
-		mainAudio.player.removeEventListener("playing", handleAudioPlaying);
+		stopAudioSequence();
 	});
 
 	// ─────────────────────────────────────────────────────────
@@ -208,6 +342,7 @@ export function useTrainer() {
 
 	function toPlaying(): void {
 		clearTimeouts();
+		stopAudioSequence();
 
 		const symbol = pickRandom(SYMBOLS);
 		const clips = MANIFEST[symbol];
@@ -230,7 +365,7 @@ export function useTrainer() {
 				id: newRoundId,
 				symbol,
 				speaker: clip.speaker,
-				url: clip.url,
+				urls: clip.urls,
 				strikes: 0,
 				startedAt: null,
 				wrongGuesses: [],
@@ -238,8 +373,9 @@ export function useTrainer() {
 			flashRed: false,
 		});
 
-		setAudioUrl(clip.url);
-		mainControls.play();
+		// Prepare and play the audio sequence
+		prepareAudioSequence(clip.urls, newRoundId);
+		playAudioSequence();
 	}
 
 	function toRevealing(roundId: number): void {
@@ -249,8 +385,7 @@ export function useTrainer() {
 		setState("gameState", "revealing");
 
 		// Replay audio for reveal
-		mainAudio.player.currentTime = 0;
-		mainControls.play();
+		replayAudioSequence();
 
 		// Schedule next round
 		revealTimeoutId = window.setTimeout(() => {
@@ -295,13 +430,6 @@ export function useTrainer() {
 		}, FLASH_DURATION_MS);
 	}
 
-	function flashGreenBriefly(): void {
-		setState("flashGreen", true);
-		flashGreenTimeoutId = window.setTimeout(() => {
-			setState("flashGreen", false);
-		}, GREEN_FLASH_DURATION_MS);
-	}
-
 	// ─────────────────────────────────────────────────────────
 	// Actions
 	// ─────────────────────────────────────────────────────────
@@ -328,10 +456,12 @@ export function useTrainer() {
 			ding.player.currentTime = 0;
 			ding.play();
 			
-			// Flash green
-			flashGreenBriefly();
-			
-			toPlaying();
+			// Flash green and wait for it to complete before starting next round
+			setState("flashGreen", true);
+			flashGreenTimeoutId = window.setTimeout(() => {
+				setState("flashGreen", false);
+				toPlaying();
+			}, GREEN_FLASH_DURATION_MS);
 			return;
 		}
 
@@ -354,19 +484,8 @@ export function useTrainer() {
 		// Flash red
 		flashRedBriefly(roundId);
 
-		// In easy mode: reveal after 2 seconds
-		if (state.easyMode) {
-			easyModeRevealTimeoutId = window.setTimeout(() => {
-				if (state.round?.id === roundId) {
-					recordTrial(newStrikes);
-					toRevealing(roundId);
-				}
-			}, EASY_MODE_REVEAL_DELAY_MS);
-			return;
-		}
-
-		// Check if max strikes reached
-		if (newStrikes >= MAX_STRIKES) {
+		// Check if max strikes reached (skip in easy mode)
+		if (!state.easyMode && newStrikes >= MAX_STRIKES) {
 			recordTrial(newStrikes);
 			toRevealing(roundId);
 		}
@@ -374,8 +493,7 @@ export function useTrainer() {
 
 	function replay(): void {
 		if (state.gameState === "awaiting") {
-			mainAudio.player.currentTime = 0;
-			mainControls.play();
+			replayAudioSequence();
 		}
 	}
 
@@ -387,6 +505,59 @@ export function useTrainer() {
 
 	function toggleEasyMode(): void {
 		setState("easyMode", !state.easyMode);
+	}
+
+	// Separate audio elements for tile audio (doesn't interfere with main game)
+	let tileAudioElements: HTMLAudioElement[] = [];
+	let tileAudioIndex = 0;
+	let isTileAudioPlaying = false;
+
+	function stopTileAudio(): void {
+		isTileAudioPlaying = false;
+		tileAudioIndex = 0;
+		for (const audio of tileAudioElements) {
+			audio.pause();
+			audio.currentTime = 0;
+			audio.onended = null;
+		}
+		tileAudioElements = [];
+	}
+
+	function playTileAudio(symbol: string): void {
+		const clips = MANIFEST[symbol];
+		if (!clips || clips.length === 0) return;
+
+		// Stop any currently playing tile audio
+		stopTileAudio();
+
+		const clip = pickRandom(clips);
+		
+		// Create audio elements for the sequence
+		tileAudioElements = clip.urls.map((url) => {
+			const audio = new Audio(url);
+			audio.preload = "auto";
+			
+			audio.onended = () => {
+				if (!isTileAudioPlaying) return;
+				
+				tileAudioIndex++;
+				if (tileAudioIndex < tileAudioElements.length) {
+					tileAudioElements[tileAudioIndex].play();
+				} else {
+					isTileAudioPlaying = false;
+					tileAudioIndex = 0;
+				}
+			};
+			
+			return audio;
+		});
+
+		// Start playing
+		isTileAudioPlaying = true;
+		tileAudioIndex = 0;
+		if (tileAudioElements.length > 0) {
+			tileAudioElements[0].play();
+		}
 	}
 
 	// ─────────────────────────────────────────────────────────
@@ -408,5 +579,6 @@ export function useTrainer() {
 		replay,
 		resetHistory,
 		toggleEasyMode,
+		playTileAudio,
 	};
 }

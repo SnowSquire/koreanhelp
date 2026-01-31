@@ -170,28 +170,41 @@ function App() {
 						const isAwaiting = () => gameState() === "awaiting";
 
 						return (
-							<button
-								type="button"
-								class="nanum-gothic-coding-regular rounded-lg border-2 px-4 py-3 text-2xl transition disabled:cursor-not-allowed"
-								classList={{
-									// Correct answer during reveal: highlighted
-									"!border-blue-500 !bg-blue-600 !text-white scale-110 shadow-lg shadow-blue-500/50":
-										isRevealing() && isCorrect(),
-									// Other symbols during reveal: darkened
-									"!border-zinc-800 !bg-zinc-900 !text-white/30 !opacity-100":
-										isRevealing() && !isCorrect(),
-									// Normal state when awaiting
-									"border-zinc-600 bg-zinc-800 text-white/90 hover:border-blue-500 hover:bg-zinc-700":
-										isAwaiting(),
-									// Normal state when not awaiting (idle/playing)
-									"border-zinc-600 bg-zinc-800 text-white/90 opacity-50":
-										!isAwaiting() && !isRevealing(),
-								}}
-								onClick={() => trainer.guess(sym)}
-								disabled={!isAwaiting()}
-							>
-								{sym}
-							</button>
+							<div class="flex flex-col items-center gap-1">
+								<button
+									type="button"
+									class="nanum-gothic-coding-regular rounded-lg border-2 px-4 py-3 text-2xl transition disabled:cursor-not-allowed w-full"
+									classList={{
+										// Correct answer during reveal: highlighted
+										"!border-blue-500 !bg-blue-600 !text-white scale-110 shadow-lg shadow-blue-500/50":
+											isRevealing() && isCorrect(),
+										// Other symbols during reveal: darkened
+										"!border-zinc-800 !bg-zinc-900 !text-white/30 !opacity-100":
+											isRevealing() && !isCorrect(),
+										// Normal state when awaiting
+										"border-zinc-600 bg-zinc-800 text-white/90 hover:border-blue-500 hover:bg-zinc-700":
+											isAwaiting(),
+										// Normal state when not awaiting (idle/playing)
+										"border-zinc-600 bg-zinc-800 text-white/90 opacity-50":
+											!isAwaiting() && !isRevealing(),
+									}}
+									onClick={() => trainer.guess(sym)}
+									onContextMenu={(e) => {
+										if (trainer.state.easyMode) {
+											e.preventDefault();
+											trainer.playTileAudio(sym);
+										}
+									}}
+									disabled={!isAwaiting()}
+								>
+									{sym}
+								</button>
+								<Show when={trainer.state.easyMode}>
+									<div class="text-xs text-white/60">
+										{TRANSLITERATION[sym] || ""}
+									</div>
+								</Show>
+							</div>
 						);
 					}}
 				</For>
